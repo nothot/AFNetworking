@@ -756,11 +756,13 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
                              downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgressBlock
                             completionHandler:(nullable void (^)(NSURLResponse *response, id _Nullable responseObject,  NSError * _Nullable error))completionHandler {
 
+    //第一步：安全地创建data task，iOS8之前有一个bug，在并发队列中创建task可能会有问题，故在串行队列中创建，iOS8之后此bug修复了，故可以直接调用
     __block NSURLSessionDataTask *dataTask = nil;
     url_session_manager_create_task_safely(^{
         dataTask = [self.session dataTaskWithRequest:request];
     });
 
+    //第二步：为data task增加代理
     [self addDelegateForDataTask:dataTask uploadProgress:uploadProgressBlock downloadProgress:downloadProgressBlock completionHandler:completionHandler];
 
     return dataTask;

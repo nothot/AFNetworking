@@ -43,6 +43,8 @@ typedef NSString * (^AFQueryStringSerializationBlock)(NSURLRequest *request, id 
  should be percent-escaped in the query string.
     - parameter string: The string to be percent-escaped.
     - returns: The percent-escaped string.
+ 
+ 百分号编码
  */
 NSString * AFPercentEscapedStringFromString(NSString *string) {
     static NSString * const kAFCharactersGeneralDelimitersToEncode = @":#[]@"; // does not include "?" or "/" due to RFC 3986 - Section 3.4
@@ -76,7 +78,7 @@ NSString * AFPercentEscapedStringFromString(NSString *string) {
 	return escaped;
 }
 
-#pragma mark -
+#pragma mark - 查询字符串对
 
 @interface AFQueryStringPair : NSObject
 @property (readwrite, nonatomic, strong) id field;
@@ -131,9 +133,10 @@ NSArray * AFQueryStringPairsFromDictionary(NSDictionary *dictionary) {
 
 NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
     NSMutableArray *mutableQueryStringComponents = [NSMutableArray array];
-
+    //字符串排序
     NSSortDescriptor *sortDescriptor = [NSSortDescriptor sortDescriptorWithKey:@"description" ascending:YES selector:@selector(compare:)];
 
+    //递归解析value
     if ([value isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dictionary = value;
         // Sort dictionary keys to ensure consistent ordering in query string, which is important when deserializing potentially ambiguous sequences, such as an array of dictionaries
@@ -154,7 +157,7 @@ NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
             [mutableQueryStringComponents addObjectsFromArray:AFQueryStringPairsFromKeyAndValue(key, obj)];
         }
     } else {
-        [mutableQueryStringComponents addObject:[[AFQueryStringPair alloc] initWithField:key value:value]];
+        [mutableQueryStringComponents addObject:[[AFQueryStringPair alloc] initWithField:key value:value]]; //递归终止
     }
 
     return mutableQueryStringComponents;
@@ -508,6 +511,7 @@ forHTTPHeaderField:(NSString *)field
         }
     }
 
+    //第三步：将生成的查询字符串添加到request中，这里分两种情况，如果是GET，HEAD，DELETE请求，则将查询字符串拼接到url后面（这里还要判断原url中是否已有其他查询字符串），如果是POST，PUT等请求，则将查询字符串放到request body
     if ([self.HTTPMethodsEncodingParametersInURI containsObject:[[request HTTPMethod] uppercaseString]]) {
         if (query && query.length > 0) {
             mutableRequest.URL = [NSURL URLWithString:[[mutableRequest.URL absoluteString] stringByAppendingFormat:mutableRequest.URL.query ? @"&%@" : @"?%@", query]];
