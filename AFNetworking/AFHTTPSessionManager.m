@@ -41,7 +41,7 @@
 #endif
 
 @interface AFHTTPSessionManager ()
-@property (readwrite, nonatomic, strong) NSURL *baseURL;
+@property (readwrite, nonatomic, strong) NSURL *baseURL;    //这里使用class-continuation的方式将属性指定为可读写，而头文件（外部）该属性是只读的
 @end
 
 @implementation AFHTTPSessionManager
@@ -62,7 +62,7 @@
 - (instancetype)initWithSessionConfiguration:(NSURLSessionConfiguration *)configuration {
     return [self initWithBaseURL:nil sessionConfiguration:configuration];
 }
-
+//初始化方法创建一个manager对象，并设定baseURL，请求序列化器，响应序列化器
 - (instancetype)initWithBaseURL:(NSURL *)url
            sessionConfiguration:(NSURLSessionConfiguration *)configuration
 {
@@ -84,7 +84,7 @@
     return self;
 }
 
-#pragma mark -
+#pragma mark -  set方法
 
 - (void)setRequestSerializer:(AFHTTPRequestSerializer <AFURLRequestSerialization> *)requestSerializer {
     NSParameterAssert(requestSerializer);
@@ -96,23 +96,6 @@
     NSParameterAssert(responseSerializer);
 
     [super setResponseSerializer:responseSerializer];
-}
-
-@dynamic securityPolicy;
-
-- (void)setSecurityPolicy:(AFSecurityPolicy *)securityPolicy {
-    if (securityPolicy.SSLPinningMode != AFSSLPinningModeNone && ![self.baseURL.scheme isEqualToString:@"https"]) {
-        NSString *pinningMode = @"Unknown Pinning Mode";
-        switch (securityPolicy.SSLPinningMode) {
-            case AFSSLPinningModeNone:        pinningMode = @"AFSSLPinningModeNone"; break;
-            case AFSSLPinningModeCertificate: pinningMode = @"AFSSLPinningModeCertificate"; break;
-            case AFSSLPinningModePublicKey:   pinningMode = @"AFSSLPinningModePublicKey"; break;
-        }
-        NSString *reason = [NSString stringWithFormat:@"A security policy configured with `%@` can only be applied on a manager with a secure base URL (i.e. https)", pinningMode];
-        @throw [NSException exceptionWithName:@"Invalid Security Policy" reason:reason userInfo:nil];
-    }
-
-    [super setSecurityPolicy:securityPolicy];
 }
 
 #pragma mark -
@@ -140,7 +123,11 @@
                                                  downloadProgress:downloadProgress
                                                           success:success
                                                           failure:failure];
-
+    /* 说明：session task的三个操作函数
+     * suspend 使任务暂停
+     * resume 使任务继续执行，包括未开始的任务和被暂停的任务
+     * cancel 使任务取消
+     */
     [dataTask resume];
 
     return dataTask;
@@ -263,7 +250,7 @@
 
     return dataTask;
 }
-
+//所有http请求方法的核心都是调用此方法产生一个data task
 - (NSURLSessionDataTask *)dataTaskWithHTTPMethod:(NSString *)method
                                        URLString:(NSString *)URLString
                                       parameters:(id)parameters
@@ -272,6 +259,7 @@
                                          success:(void (^)(NSURLSessionDataTask *, id))success
                                          failure:(void (^)(NSURLSessionDataTask *, NSError *))failure
 {
+    //根据url等参数，使用请求序列化器创建request
     NSError *serializationError = nil;
     NSMutableURLRequest *request = [self.requestSerializer requestWithMethod:method URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters error:&serializationError];
     if (serializationError) {
@@ -283,7 +271,7 @@
 
         return nil;
     }
-
+    //使用前面的request创建data task，调用父类的方法实现
     __block NSURLSessionDataTask *dataTask = nil;
     dataTask = [self dataTaskWithRequest:request
                           uploadProgress:uploadProgress

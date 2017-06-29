@@ -97,6 +97,8 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
 
 /**
  The string encoding used to serialize parameters. `NSUTF8StringEncoding` by default.
+ 
+ 用于序列化参数的字符串编码方式，默认为NSUTF8StringEncoding
  */
 @property (nonatomic, assign) NSStringEncoding stringEncoding;
 
@@ -104,6 +106,8 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  Whether created requests can use the device’s cellular radio (if present). `YES` by default.
 
  @see NSMutableURLRequest -setAllowsCellularAccess:
+ 
+ 是否允许创建的请求使用设备的蜂窝数据网络，默认为YES
  */
 @property (nonatomic, assign) BOOL allowsCellularAccess;
 
@@ -111,6 +115,11 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  The cache policy of created requests. `NSURLRequestUseProtocolCachePolicy` by default.
 
  @see NSMutableURLRequest -setCachePolicy:
+ 
+ 创建的请求使用的缓存策略，默认为NSURLRequestUseProtocolCachePolicy，该策略表示
+ 如果缓存不存在，直接从服务端获取。如果缓存存在，会根据response中的Cache-Control字段判断
+ 下一步操作，如: Cache-Control字段为must-revalidata, 则 询问服务端该数据是否有更新，无更新话
+ 直接返回给用户缓存数据，若已更新，则请求服务端.
  */
 @property (nonatomic, assign) NSURLRequestCachePolicy cachePolicy;
 
@@ -118,6 +127,8 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  Whether created requests should use the default cookie handling. `YES` by default.
 
  @see NSMutableURLRequest -setHTTPShouldHandleCookies:
+ 
+ 创建的请求是否应该使用默认的cookie处理，默认为YES
  */
 @property (nonatomic, assign) BOOL HTTPShouldHandleCookies;
 
@@ -125,6 +136,8 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  Whether created requests can continue transmitting data before receiving a response from an earlier transmission. `NO` by default
 
  @see NSMutableURLRequest -setHTTPShouldUsePipelining:
+ 
+ 创建的请求是否需要等到上一个请求收到回复后才能发送下一次请求，默认为NO，表示需要等到上一次请求收到回复后，才可以发起下一次请求
  */
 @property (nonatomic, assign) BOOL HTTPShouldUsePipelining;
 
@@ -132,6 +145,9 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  The network service type for created requests. `NSURLNetworkServiceTypeDefault` by default.
 
  @see NSMutableURLRequest -setNetworkServiceType:
+ 
+ 网络服务类型，默认为NSURLNetworkServiceTypeDefault，这个网络服务类型用来告诉网络层请求的目的，NSURLNetworkServiceTypeVoIP是指该请求用于网际协议通话技术
+ 系统会根据用途进行一定的优化，以提高性能
  */
 @property (nonatomic, assign) NSURLRequestNetworkServiceType networkServiceType;
 
@@ -139,6 +155,8 @@ typedef NS_ENUM(NSUInteger, AFHTTPRequestQueryStringSerializationStyle) {
  The timeout interval, in seconds, for created requests. The default timeout interval is 60 seconds.
 
  @see NSMutableURLRequest -setTimeoutInterval:
+ 
+ 请求的超时时间，单位为秒，默认超时时间为60秒
  */
 @property (nonatomic, assign) NSTimeInterval timeoutInterval;
 
@@ -233,6 +251,10 @@ forHTTPHeaderField:(NSString *)field;
  @param error The error that occurred while constructing the request.
 
  @return An `NSMutableURLRequest` object.
+ 
+ 使用指定的http方法和url构建一个http request
+ 
+ 如果http方法是GET，HEAD，DELETE，参数用来构建一个url编码的查询字符串，并附加到url上，否则，参数将会编码并设置为请求的body
  */
 - (NSMutableURLRequest *)requestWithMethod:(NSString *)method
                                  URLString:(NSString *)URLString
