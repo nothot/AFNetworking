@@ -1219,24 +1219,42 @@ didBecomeDownloadTask:(NSURLSessionDownloadTask *)downloadTask
 /**
  是否需要缓存response
  
+ 当task接收到所有期望的数据后，session会调用此代理方法。如果你没有实现该方法，那么就会使用创建session时使用的configuration对象决定缓存策略。这个代理方法最初的目的是为了阻止缓存特定的URLs或者修改NSCacheURLResponse对象相关的userInfo字典。
+ 
+ 该方法只会当request决定缓存response时候调用。作为准则，responses只会当以下条件都成立的时候返回缓存：
+ 
+ 1. 该request是HTTP或HTTPS URL的请求（或者你自定义的网络协议，并且确保该协议支持缓存）
+ 2. 确保request请求是成功的（返回的status code为200-299）
+ 3. 返回的response是来自服务器端的，而非缓存中本身就有的
+ 4. 提供的NSURLRequest对象的缓存策略要允许进行缓存
+ 5. 服务器返回的response中与缓存相关的header要允许缓存
+ 6. 该response的大小不能比提供的缓存空间大太多（比如你提供了一个磁盘缓存，那么response大小一定不能比磁盘缓存空间还要大5%）
  */
 - (void)URLSession:(NSURLSession *)session
           dataTask:(NSURLSessionDataTask *)dataTask
  willCacheResponse:(NSCachedURLResponse *)proposedResponse
  completionHandler:(void (^)(NSCachedURLResponse *cachedResponse))completionHandler
 {
+    //获取缓存response
     NSCachedURLResponse *cachedResponse = proposedResponse;
-
+    //如果用户有自定义缓存response处理逻辑，那么执行（例如用户可以直接指定缓存response为空，那意味着拒绝缓存）
     if (self.dataTaskWillCacheResponse) {
         cachedResponse = self.dataTaskWillCacheResponse(session, dataTask, proposedResponse);
     }
-
+    //传入缓存response，继续执行
     if (completionHandler) {
         completionHandler(cachedResponse);
     }
 }
-
+/**
+ 当session中所有已经入队的消息被发送出去后，会调用该代理方法
+ 
+ 在iOS中，当一个后台传输任务完成或者后台传输时需要证书，而此时你的app正在后台挂起，那么你的app在后台会自动重新启动运行，并且这个app的UIApplicationDelegate会发送一个application:handleEventsForBackgroundURLSession:completionHandler:消息。该消息包含了对应后台的session的identifier，而且这个消息会导致你的app启动。你的app随后应该先存储completion handler，然后再使用相同的identifier创建一个background configuration，并根据这个background configuration创建一个新的session。这个新创建的session会自动与后台任务重新关联在一起。
+ 
+ 当你的app获取了一个URLSessionDidFinishEventsForBackgroundURLSession:消息，这就意味着之前这个session中已经入队的所有消息都转发出去了，这时候再调用先前存取的completion handler是安全的，或者因为内部更新而导致调用completion handler也是安全的。
+ */
 - (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
+    //如果用户有自定义处理，那么执行
     if (self.didFinishEventsForBackgroundURLSession) {
         dispatch_async(dispatch_get_main_queue(), ^{
             self.didFinishEventsForBackgroundURLSession(session);
