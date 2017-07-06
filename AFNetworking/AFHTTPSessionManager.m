@@ -95,11 +95,13 @@
 - (void)setResponseSerializer:(AFHTTPResponseSerializer <AFURLResponseSerialization> *)responseSerializer {
     NSParameterAssert(responseSerializer);
 
-    [super setResponseSerializer:responseSerializer];
+    [super setResponseSerializer:responseSerializer];   //这里是在父类里，即AFURLSessionManager中设置的
 }
 
 #pragma mark -
-
+/**
+ GET请求
+ */
 - (NSURLSessionDataTask *)GET:(NSString *)URLString
                    parameters:(id)parameters
                       success:(void (^)(NSURLSessionDataTask *task, id responseObject))success
@@ -178,7 +180,47 @@
 {
     return [self POST:URLString parameters:parameters constructingBodyWithBlock:block progress:nil success:success failure:failure];
 }
-
+/**
+ 其他请求方法大致类似，唯独这个方法有些不一样，它是multipart/form data请求的实现，是基于POST请求实现的，虽然数据都是放在body上，但它和POST请求不同的是，POST的body是以key=value的形式，而multipart/form data是以分隔符的形式，这主要是解决key=value形式难以表示文件实体
+ 
+ ******************** multipart/form data请求header中需要设置：********************
+ 
+ Content-Type: multipart/form-data; boundary=${bound}
+ bound可以是一段字符串，表示分隔符，例如-------239449483y6273
+ 
+ ******************** multipart/form data请求body示例：********************
+ 
+ --${bound}
+ Content-Disposition: form-data; name="Filename"
+ 
+ HTTP.pdf
+ --${bound}
+ Content-Disposition: form-data; name="file000"; filename="HTTP协议详解.pdf"
+ Content-Type: application/octet-stream
+ 
+ %PDF-1.5
+ file content
+ %%EOF
+ 
+ --${bound}
+ Content-Disposition: form-data; name="Upload"
+ 
+ Submit Query
+ --${bound}--
+ 
+ ******************** multipart/form data请求示例：******************** 
+ 
+ AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
+ [manager POST:@"postURLString" parameters:@{@"Filename":@"HTTP.pdf"} constructingBodyWithBlock:^(id<AFMultipartFormData>  _Nonnull formData) {
+    [formData appendPartWithFileData:[pdf文件具体内容(NSData *)]
+                                name:@"file000"
+                            fileName:@"HTTP协议详解.pdf"
+                            mimeType:@"application/octet-stream"];
+    [formData appendPartWithFormData:[@"Submit Query" dataUsingEncoding:NSUTF8StringEncoding]
+                                name:@"Upload"];
+ } progress:nil success:nil failure:nil];
+ 
+ */
 - (NSURLSessionDataTask *)POST:(NSString *)URLString
                     parameters:(id)parameters
      constructingBodyWithBlock:(void (^)(id <AFMultipartFormData> formData))block
@@ -187,6 +229,7 @@
                        failure:(void (^)(NSURLSessionDataTask *task, NSError *error))failure
 {
     NSError *serializationError = nil;
+    //方法内依旧是分为两个阶段，先是创建request，不过调用的方法不一样
     NSMutableURLRequest *request = [self.requestSerializer multipartFormRequestWithMethod:@"POST" URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters constructingBodyWithBlock:block error:&serializationError];
     if (serializationError) {
         if (failure) {
@@ -197,7 +240,7 @@
 
         return nil;
     }
-
+    //然后是根据request创建上传task
     __block NSURLSessionDataTask *task = [self uploadTaskWithStreamedRequest:request progress:uploadProgress completionHandler:^(NSURLResponse * __unused response, id responseObject, NSError *error) {
         if (error) {
             if (failure) {
@@ -250,7 +293,10 @@
 
     return dataTask;
 }
-//所有http请求方法的核心都是调用此方法产生一个data task
+
+/**
+ 所有http请求方法的核心都是调用此方法产生一个data task!!!
+ */
 - (NSURLSessionDataTask *)dataTaskWithHTTPMethod:(NSString *)method
                                        URLString:(NSString *)URLString
                                       parameters:(id)parameters
@@ -298,11 +344,13 @@
 }
 
 #pragma mark - NSSecureCoding
-
+/**
+ 编解码
+ */
 + (BOOL)supportsSecureCoding {
     return YES;
 }
-
+//解码操作，产生AFHTTPSessionManager对象
 - (instancetype)initWithCoder:(NSCoder *)decoder {
     NSURL *baseURL = [decoder decodeObjectOfClass:[NSURL class] forKey:NSStringFromSelector(@selector(baseURL))];
     NSURLSessionConfiguration *configuration = [decoder decodeObjectOfClass:[NSURLSessionConfiguration class] forKey:@"sessionConfiguration"];
@@ -331,7 +379,7 @@
 
     return self;
 }
-
+//编码
 - (void)encodeWithCoder:(NSCoder *)coder {
     [super encodeWithCoder:coder];
 
@@ -347,7 +395,7 @@
 }
 
 #pragma mark - NSCopying
-
+//这里执行的是深拷贝
 - (instancetype)copyWithZone:(NSZone *)zone {
     AFHTTPSessionManager *HTTPClient = [[[self class] allocWithZone:zone] initWithBaseURL:self.baseURL sessionConfiguration:self.session.configuration];
 
