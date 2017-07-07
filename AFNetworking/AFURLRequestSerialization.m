@@ -78,6 +78,15 @@ NSString * AFPercentEscapedStringFromString(NSString *string) {
 	return escaped;
 }
 
+#pragma mark - AFStreamingMultipartFormData
+
+@interface AFStreamingMultipartFormData : NSObject <AFMultipartFormData>
+- (instancetype)initWithURLRequest:(NSMutableURLRequest *)urlRequest
+                    stringEncoding:(NSStringEncoding)encoding;
+
+- (NSMutableURLRequest *)requestByFinalizingMultipartFormData;
+@end
+
 #pragma mark - 查询字符串对
 
 @interface AFQueryStringPair : NSObject
@@ -162,15 +171,6 @@ NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
 
     return mutableQueryStringComponents;
 }
-
-#pragma mark -
-
-@interface AFStreamingMultipartFormData : NSObject <AFMultipartFormData>
-- (instancetype)initWithURLRequest:(NSMutableURLRequest *)urlRequest
-                    stringEncoding:(NSStringEncoding)encoding;
-
-- (NSMutableURLRequest *)requestByFinalizingMultipartFormData;
-@end
 
 #pragma mark -
 /**
@@ -591,21 +591,25 @@ forHTTPHeaderField:(NSString *)field
 @end
 
 #pragma mark -
-
+/**
+ 创建分隔符，使用两个16进制数拼接而成
+ 
+ %08x，表示按照16进制输出，输出最小宽度为8，不足8位补0，超出8位按原位数输出
+ */
 static NSString * AFCreateMultipartFormBoundary() {
     return [NSString stringWithFormat:@"Boundary+%08X%08X", arc4random(), arc4random()];
 }
 
 static NSString * const kAFMultipartFormCRLF = @"\r\n";
-
+//如果是开头分隔符的，那么只需在分隔符结尾加一个换行符
 static inline NSString * AFMultipartFormInitialBoundary(NSString *boundary) {
     return [NSString stringWithFormat:@"--%@%@", boundary, kAFMultipartFormCRLF];
 }
-
+//如果是中间部分分隔符，那么需要分隔符前面和结尾都加换行符
 static inline NSString * AFMultipartFormEncapsulationBoundary(NSString *boundary) {
     return [NSString stringWithFormat:@"%@--%@%@", kAFMultipartFormCRLF, boundary, kAFMultipartFormCRLF];
 }
-
+//如果是末尾，还得使用--分隔符--作为请求体的结束标志
 static inline NSString * AFMultipartFormFinalBoundary(NSString *boundary) {
     return [NSString stringWithFormat:@"%@--%@--%@", kAFMultipartFormCRLF, boundary, kAFMultipartFormCRLF];
 }
@@ -653,13 +657,13 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 - (void)appendHTTPBodyPart:(AFHTTPBodyPart *)bodyPart;
 @end
 
-#pragma mark -
+#pragma mark - AFStreamingMultipartFormData
 
 @interface AFStreamingMultipartFormData ()
-@property (readwrite, nonatomic, copy) NSMutableURLRequest *request;
-@property (readwrite, nonatomic, assign) NSStringEncoding stringEncoding;
-@property (readwrite, nonatomic, copy) NSString *boundary;
-@property (readwrite, nonatomic, strong) AFMultipartBodyStream *bodyStream;
+@property (readwrite, nonatomic, copy) NSMutableURLRequest *request;    //请求
+@property (readwrite, nonatomic, assign) NSStringEncoding stringEncoding;   //字符串编码方式
+@property (readwrite, nonatomic, copy) NSString *boundary;  //multipart/form-data请求分隔符
+@property (readwrite, nonatomic, strong) AFMultipartBodyStream *bodyStream; //multipart/form-data请求body
 @end
 
 @implementation AFStreamingMultipartFormData
@@ -815,14 +819,15 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 }
 
 - (NSMutableURLRequest *)requestByFinalizingMultipartFormData {
+    //如果bodyStream为空，那么就是普通的请求
     if ([self.bodyStream isEmpty]) {
         return self.request;
     }
 
-    // Reset the initial and final boundaries to ensure correct Content-Length
+    //这里设置开头和结尾分隔符，以确保Content-Length计算正确
     [self.bodyStream setInitialAndFinalBoundaries];
     [self.request setHTTPBodyStream:self.bodyStream];
-
+    //设置请求头字段
     [self.request setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", self.boundary] forHTTPHeaderField:@"Content-Type"];
     [self.request setValue:[NSString stringWithFormat:@"%llu", [self.bodyStream contentLength]] forHTTPHeaderField:@"Content-Length"];
 
@@ -970,7 +975,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 - (unsigned long long)contentLength {
     unsigned long long length = 0;
     for (AFHTTPBodyPart *bodyPart in self.HTTPBodyParts) {
-        length += [bodyPart contentLength];
+        length += [bodyPart contentLength]; //计算每一个part的长度，因为一个bodyStream是由多个bodyPart组成的，这里将计算bodyStream的总长度
     }
 
     return length;
@@ -1064,7 +1069,9 @@ typedef enum {
 
     return _inputStream;
 }
-
+/**
+ 这里返回bodypart中header字符串
+ */
 - (NSString *)stringForHeaders {
     NSMutableString *headerString = [NSMutableString string];
     for (NSString *field in [self.headers allKeys]) {
@@ -1074,21 +1081,23 @@ typedef enum {
 
     return [NSString stringWithString:headerString];
 }
-
+/**
+ bodyPart长度
+ */
 - (unsigned long long)contentLength {
     unsigned long long length = 0;
-
+    //首先判断是否有开头分隔符，开头分隔符与中间分隔符对于某一个part而言是不能共存的，故这里是在确定该part是开头还是中间，并计算其长度
     NSData *encapsulationBoundaryData = [([self hasInitialBoundary] ? AFMultipartFormInitialBoundary(self.boundary) : AFMultipartFormEncapsulationBoundary(self.boundary)) dataUsingEncoding:self.stringEncoding];
     length += [encapsulationBoundaryData length];
-
+    //每个AFHTTPBodyPart对象中还有Content-Disposition等header，这些长度还要计算
     NSData *headersData = [[self stringForHeaders] dataUsingEncoding:self.stringEncoding];
     length += [headersData length];
-
+    //文件内容的长度
     length += _bodyContentLength;
-
+    //如果是最后一个bodyPart，那么还有结尾分隔符，也要计算他的长度
     NSData *closingBoundaryData = ([self hasFinalBoundary] ? [AFMultipartFormFinalBoundary(self.boundary) dataUsingEncoding:self.stringEncoding] : [NSData data]);
     length += [closingBoundaryData length];
-
+    //所有长度加起来返回
     return length;
 }
 
