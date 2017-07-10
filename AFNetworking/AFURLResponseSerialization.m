@@ -105,8 +105,10 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     return self;
 }
 
-#pragma mark -
-
+#pragma mark - 响应序列化器实现（父类）
+/**
+ 验证返回的response是否是可用的
+ */
 - (BOOL)validateResponse:(NSHTTPURLResponse *)response
                     data:(NSData *)data
                    error:(NSError * __autoreleasing *)error
@@ -114,7 +116,9 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     BOOL responseIsValid = YES;
     NSError *validationError = nil;
 
+    //首先进行非空和类型判断，默认response是合法的，这里如果response为空或者类型不对，会被视为合法的
     if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+        //如果返回的response的mime type是不可接受的，那么生成error信息
         if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]] &&
             !([response MIMEType] == nil && [data length] == 0)) {
 
@@ -133,7 +137,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
             responseIsValid = NO;
         }
-
+        //判断返回的状态码是否是可接受的，否，则生成error信息
         if (self.acceptableStatusCodes && ![self.acceptableStatusCodes containsIndex:(NSUInteger)response.statusCode] && [response URL]) {
             NSMutableDictionary *mutableUserInfo = [@{
                                                NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: %@ (%ld)", @"AFNetworking", nil), [NSHTTPURLResponse localizedStringForStatusCode:response.statusCode], (long)response.statusCode],
@@ -159,7 +163,9 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 }
 
 #pragma mark - AFURLResponseSerialization
-
+/**
+ 父类的responseObjectForResponse方法仅仅是验证返回的response是否是可用的，如果是，直接返回，并未做其他任何处理
+ */
 - (id)responseObjectForResponse:(NSURLResponse *)response
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
@@ -204,7 +210,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 @end
 
-#pragma mark -
+#pragma mark - JSON序列化器（子类）
 
 @implementation AFJSONResponseSerializer
 
@@ -236,6 +242,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
 {
+    //同样先验证response
     if (![self validateResponse:(NSHTTPURLResponse *)response data:data error:error]) {
         if (!error || AFErrorOrUnderlyingErrorHasCodeInDomain(*error, NSURLErrorCannotDecodeContentData, AFURLResponseSerializationErrorDomain)) {
             return nil;
@@ -245,14 +252,16 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     id responseObject = nil;
     NSError *serializationError = nil;
     // Workaround for behavior of Rails to return a single space for `head :ok` (a workaround for a bug in Safari), which is not interpreted as valid input by NSJSONSerialization.
+    //对于'head :ok'，Rails返回的是一个空格 (这是Safari上的一个bug)，并且这样的JSON格式不会被NSJSONSerialization解析。
     // See https://github.com/rails/rails/issues/1742
     BOOL isSpace = [data isEqualToData:[NSData dataWithBytes:" " length:1]];
+    //如果是单个空格，不解析，否则，使用系统自带的API解析data
     if (data.length > 0 && !isSpace) {
         responseObject = [NSJSONSerialization JSONObjectWithData:data options:self.readingOptions error:&serializationError];
     } else {
         return nil;
     }
-
+    //移除所有value为空的key，如果允许的话
     if (self.removesKeysWithNullValues && responseObject) {
         responseObject = AFJSONObjectByRemovingKeysWithNullValues(responseObject, self.readingOptions);
     }
@@ -297,7 +306,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 @end
 
-#pragma mark -
+#pragma mark - XML序列化器（子类）
 
 @implementation AFXMLParserResponseSerializer
 
@@ -329,7 +338,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
             return nil;
         }
     }
-
+    //使用系统的解析API
     return [[NSXMLParser alloc] initWithData:data];
 }
 
@@ -417,7 +426,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 #endif
 
-#pragma mark -
+#pragma mark - Plist序列化器（子类）
 
 @implementation AFPropertyListResponseSerializer
 
@@ -460,7 +469,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
     id responseObject;
     NSError *serializationError = nil;
-
+    //调用系统API
     if (data) {
         responseObject = [NSPropertyListSerialization propertyListWithData:data options:self.readOptions format:NULL error:&serializationError];
     }
@@ -505,7 +514,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 @end
 
-#pragma mark -
+#pragma mark - 图片序列化器（子类）
 
 #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH
 #import <CoreGraphics/CoreGraphics.h>
@@ -669,7 +678,7 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
             return nil;
         }
     }
-
+    //将NSData转成image
 #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH
     if (self.automaticallyInflatesResponseImage) {
         return AFInflatedImageFromResponseWithDataAtScale((NSHTTPURLResponse *)response, data, self.imageScale);
@@ -734,7 +743,10 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
 
 @end
 
-#pragma mark -
+#pragma mark - 复合序列化器（子类）
+/**
+ 该类是一个复合多个序列化器的子类，当确实不知道返回的response的mime type时，可以使用该类，一定可以找到合适的序列化器
+ */
 
 @interface AFCompoundResponseSerializer ()
 @property (readwrite, nonatomic, copy) NSArray *responseSerializers;
@@ -755,11 +767,12 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
 {
+    //对所有的可用序列化器执行遍历，找到合适的序列化器
     for (id <AFURLResponseSerialization> serializer in self.responseSerializers) {
         if (![serializer isKindOfClass:[AFHTTPResponseSerializer class]]) {
             continue;
         }
-
+        //解析数据
         NSError *serializerError = nil;
         id responseObject = [serializer responseObjectForResponse:response data:data error:&serializerError];
         if (responseObject) {
@@ -770,7 +783,7 @@ static UIImage * AFInflatedImageFromResponseWithDataAtScale(NSHTTPURLResponse *r
             return responseObject;
         }
     }
-
+    //没有合适的序列化器。调用父类方法
     return [super responseObjectForResponse:response data:data error:error];
 }
 

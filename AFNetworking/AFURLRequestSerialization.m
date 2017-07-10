@@ -172,7 +172,7 @@ NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
     return mutableQueryStringComponents;
 }
 
-#pragma mark -
+#pragma mark - 请求序列化器（父类）
 /**
  static说明方法只在本文件内可用，函数内生成一个数组，包含了所有需要观察的keypath：
  allowsCellularAccess，cachePolicy，HTTPShouldHandleCookies，HTTPShouldUsePipelining，networkServiceType，timeoutInterval
@@ -211,7 +211,9 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     self.stringEncoding = NSUTF8StringEncoding;
 
     self.mutableHTTPRequestHeaders = [NSMutableDictionary dictionary];
-
+    /**
+     这里主要是设置header，设置Accept-Language，User-Agent
+     */
     // Accept-Language HTTP Header; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.4
     NSMutableArray *acceptLanguagesComponents = [NSMutableArray array];
     [[NSLocale preferredLanguages] enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
@@ -240,10 +242,11 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
         }
         [self setValue:userAgent forHTTPHeaderField:@"User-Agent"];
     }
-
+    //这里把需要将参数编码在URL上的http method放在一个数组里，方便后面使用
     // HTTP Method Definitions; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
     self.HTTPMethodsEncodingParametersInURI = [NSSet setWithObjects:@"GET", @"HEAD", @"DELETE", nil];
-
+    //
+    //初始化要观察的keypath
     self.mutableObservedChangedKeyPaths = [NSMutableSet set];
     for (NSString *keyPath in AFHTTPRequestSerializerObservedKeyPaths()) {
         if ([self respondsToSelector:NSSelectorFromString(keyPath)]) {
@@ -253,7 +256,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 
     return self;
 }
-
+//移除观察者
 - (void)dealloc {
     for (NSString *keyPath in AFHTTPRequestSerializerObservedKeyPaths()) {
         if ([self respondsToSelector:NSSelectorFromString(keyPath)]) {
@@ -262,7 +265,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     }
 }
 
-#pragma mark -
+#pragma mark - 重写属性的setter方法，以支持KVO通知
 
 // Workarounds for crashing behavior using Key-Value Observing with XCTest
 // See https://github.com/AFNetworking/AFNetworking/issues/2523
@@ -303,7 +306,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     [self didChangeValueForKey:NSStringFromSelector(@selector(timeoutInterval))];
 }
 
-#pragma mark -
+#pragma mark - 这是一组方便对header操作的工具方法
 
 - (NSDictionary *)HTTPRequestHeaders {
     return [NSDictionary dictionaryWithDictionary:self.mutableHTTPRequestHeaders];
@@ -380,7 +383,9 @@ forHTTPHeaderField:(NSString *)field
 
 	return mutableRequest;
 }
-
+/**
+ 创建multipart/form 请求
+ */
 - (NSMutableURLRequest *)multipartFormRequestWithMethod:(NSString *)method
                                               URLString:(NSString *)URLString
                                              parameters:(NSDictionary *)parameters
@@ -389,11 +394,11 @@ forHTTPHeaderField:(NSString *)field
 {
     NSParameterAssert(method);
     NSParameterAssert(![method isEqualToString:@"GET"] && ![method isEqualToString:@"HEAD"]);
-
+    //首先创建一个普通的请求
     NSMutableURLRequest *mutableRequest = [self requestWithMethod:method URLString:URLString parameters:nil error:error];
-
+    //构建form data
     __block AFStreamingMultipartFormData *formData = [[AFStreamingMultipartFormData alloc] initWithURLRequest:mutableRequest stringEncoding:NSUTF8StringEncoding];
-
+    
     if (parameters) {
         for (AFQueryStringPair *pair in AFQueryStringPairsFromDictionary(parameters)) {
             NSData *data = nil;
@@ -418,21 +423,30 @@ forHTTPHeaderField:(NSString *)field
     return [formData requestByFinalizingMultipartFormData];
 }
 
+/**
+ 另一种构建multipart/form请求的方式
+ 将原来request中的HTTPBodyStream内容异步写入到指定文件中，随后调用completionHandler处理。最后返回新的request。
+ @param request multipart形式的request，其中HTTPBodyStream属性不能为nil
+ @param fileURL multipart request中的HTTPBodyStream内容写入的文件位置
+ @param handler 用于处理的block
+ @discussion NSURLSessionTask中有一个bug，当HTTP body的内容是来自NSStream的时候，request无法发送Content-Length到服务器端，此问题在Amazon S3的Web服务中尤为显著。作为一个解决方案，该函数的request参数使用的是multipartFormRequestWithMethod:URLString:parameters:constructingBodyWithBlock:error:构建出的request，或者其他HTTPBodyStream属性不为空的request。接着将HTTPBodyStream的内容先写到指定的文件中，再返回一个原来那个request的拷贝，其中该拷贝的HTTPBodyStream属性值要置为空。至此，可以使用AFURLSessionManager -uploadTaskWithRequest:fromFile:progress:completionHandler:函数构建一个上传任务，或者将文件内容转变为NSData类型，并且指定给新request的HTTPBody属性。
+ @see https://github.com/AFNetworking/AFNetworking/issues/1398
+ */
 - (NSMutableURLRequest *)requestWithMultipartFormRequest:(NSURLRequest *)request
                              writingStreamContentsToFile:(NSURL *)fileURL
                                        completionHandler:(void (^)(NSError *error))handler
 {
     NSParameterAssert(request.HTTPBodyStream);
     NSParameterAssert([fileURL isFileURL]);
-
+    //初始化输出流
     NSInputStream *inputStream = request.HTTPBodyStream;
     NSOutputStream *outputStream = [[NSOutputStream alloc] initWithURL:fileURL append:NO];
     __block NSError *error = nil;
-
+    //异步执行写入操作
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         [inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
         [outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-
+        
         [inputStream open];
         [outputStream open];
 
@@ -458,14 +472,14 @@ forHTTPHeaderField:(NSString *)field
 
         [outputStream close];
         [inputStream close];
-
+        //写入完成，回到主线程处理handler
         if (handler) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 handler(error);
             });
         }
     });
-
+    
     NSMutableURLRequest *mutableRequest = [request mutableCopy];
     mutableRequest.HTTPBodyStream = nil;
 
@@ -539,7 +553,9 @@ forHTTPHeaderField:(NSString *)field
 
     return [super automaticallyNotifiesObserversForKey:key];
 }
-
+/**
+ 一旦用户设置了某个属性，就会触发这里的KVO通知，从而在mutableObservedChangedKeyPaths数组中记录用户设置了哪些属性
+ */
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(__unused id)object
                         change:(NSDictionary *)change
@@ -590,7 +606,7 @@ forHTTPHeaderField:(NSString *)field
 
 @end
 
-#pragma mark -
+#pragma mark - 以下是multipart/form data请求模块
 /**
  创建分隔符，使用两个16进制数拼接而成
  
@@ -657,7 +673,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 - (void)appendHTTPBodyPart:(AFHTTPBodyPart *)bodyPart;
 @end
 
-#pragma mark - AFStreamingMultipartFormData
+#pragma mark - AFStreamingMultipartFormData 构建multi part/form data请求体
 
 @interface AFStreamingMultipartFormData ()
 @property (readwrite, nonatomic, copy) NSMutableURLRequest *request;    //请求
@@ -683,7 +699,9 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
     return self;
 }
-
+/**
+ 通过文件URL向formData追加数据
+ */
 - (BOOL)appendPartWithFileURL:(NSURL *)fileURL
                          name:(NSString *)name
                         error:(NSError * __autoreleasing *)error
@@ -696,7 +714,9 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
     return [self appendPartWithFileURL:fileURL name:name fileName:fileName mimeType:mimeType error:error];
 }
-
+/**
+ 上面的方法是调用此方法实现的
+ */
 - (BOOL)appendPartWithFileURL:(NSURL *)fileURL
                          name:(NSString *)name
                      fileName:(NSString *)fileName
@@ -707,7 +727,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
     NSParameterAssert(name);
     NSParameterAssert(fileName);
     NSParameterAssert(mimeType);
-
+    //判断是否是文件URL，不是则抛出error
     if (![fileURL isFileURL]) {
         NSDictionary *userInfo = @{NSLocalizedFailureReasonErrorKey: NSLocalizedStringFromTable(@"Expected URL to be a file URL", @"AFNetworking", nil)};
         if (error) {
@@ -716,6 +736,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
         return NO;
     } else if ([fileURL checkResourceIsReachableAndReturnError:error] == NO) {
+        //判断该URL指定的文件是否可以使用，否则抛出error
         NSDictionary *userInfo = @{NSLocalizedFailureReasonErrorKey: NSLocalizedStringFromTable(@"File URL not reachable.", @"AFNetworking", nil)};
         if (error) {
             *error = [[NSError alloc] initWithDomain:AFURLRequestSerializationErrorDomain code:NSURLErrorBadURL userInfo:userInfo];
@@ -723,7 +744,7 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
         return NO;
     }
-
+    //文件没有问题，开始bodyStream追加数据
     NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:[fileURL path] error:error];
     if (!fileAttributes) {
         return NO;
@@ -732,7 +753,8 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
     NSMutableDictionary *mutableHeaders = [NSMutableDictionary dictionary];
     [mutableHeaders setValue:[NSString stringWithFormat:@"form-data; name=\"%@\"; filename=\"%@\"", name, fileName] forKey:@"Content-Disposition"];
     [mutableHeaders setValue:mimeType forKey:@"Content-Type"];
-
+    
+    //构建http body part，因为最终的body stream就是由多个http body part构成的
     AFHTTPBodyPart *bodyPart = [[AFHTTPBodyPart alloc] init];
     bodyPart.stringEncoding = self.stringEncoding;
     bodyPart.headers = mutableHeaders;
@@ -743,7 +765,9 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
     return YES;
 }
-
+/**
+ 根据输入流构建body stream，原理同上
+ */
 - (void)appendPartWithInputStream:(NSInputStream *)inputStream
                              name:(NSString *)name
                          fileName:(NSString *)fileName
@@ -768,7 +792,9 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
     [self.bodyStream appendHTTPBodyPart:bodyPart];
 }
-
+/**
+ 根据NSData构建body stream，原理与上类似
+ */
 - (void)appendPartWithFileData:(NSData *)data
                           name:(NSString *)name
                       fileName:(NSString *)fileName
@@ -784,7 +810,9 @@ NSTimeInterval const kAFUploadStream3GSuggestedDelay = 0.2;
 
     [self appendPartWithHeaders:mutableHeaders body:data];
 }
-
+/**
+ 同样是根据NSData构建body stream，只是NSData并不是一个文件
+ */
 - (void)appendPartWithFormData:(NSData *)data
                           name:(NSString *)name
 {
@@ -1223,7 +1251,7 @@ typedef enum {
 
 @end
 
-#pragma mark -
+#pragma mark - 以下是对请求参数进行序列化的逻辑实现，包括JSON序列化和plist序列化，均继承于AFHTTPRequestSerializer
 
 @implementation AFJSONRequestSerializer
 
