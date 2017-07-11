@@ -260,7 +260,7 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
     /**
      如果使用自建证书并且还希望验证域名，那么必须使用pinning
      
-     self.allowInvalidCertificates = YES 表示始终信任服务器，无论证书是否合法或过期
+     self.allowInvalidCertificates = YES 表示始终信任服务器，无论证书是否合法或过期(其实这里主要就是给自签名证书提供一个验证通过的机会，这个属性的名字是有点迷惑性的。。。)
      self.validatesDomainName = YES 表示验证域名
      此条件表示，如果希望使用自建证书并且还要验证域名，那么必须使用pinnedCertificates（就是在客户端保存服务器端颁发的证书拷贝）才行，如果有以下两种情况，那么就返回NO，不可信任
      1. 选择了不使用pinning（AFSSLPinningModeNone），也就是说只在系统的信任机构列表里验证服务端返回的证书
@@ -293,6 +293,17 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 
     /**
      如果不使用SSL pinning，那么如果始终信任服务器，无论证书是否合法或过期，那么返回YES(比如使用自建证书)，或者使用AFServerTrustIsValid函数评价证书是否可信任，如果是，同样返回YES
+     
+     在pinning mode为None的情况下：
+     1. 使用自建证书，如果需要验证域名，那么直接返回NO（因为这种情况必须使用pinning，否则无法做验证），如果不需要验证域名，会走到下面的if语句并返回YES（不验证域名本来就是有风险的，用户选择不验证，就需要承担风险）
+     2. 使用第三方机构颁发的证书，如果AFServerTrustIsValid函数评价为信任，则返回YES，评价为不信任则返回NO
+     
+     在pinning mode不为None的情况下：
+     如果不使用自建证书，而使用第三方机构颁发的证书，AFServerTrustIsValid函数评价为不信任，则返回NO
+     
+     其他所有情况进入下面的switch语句处理
+     
+     
     */
     if (self.SSLPinningMode == AFSSLPinningModeNone) {
         return self.allowInvalidCertificates || AFServerTrustIsValid(serverTrust);
